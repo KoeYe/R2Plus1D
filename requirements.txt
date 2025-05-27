@@ -1,0 +1,11 @@
+torch
+torchvision
+torchnet
+matplotlib
+scikit-learn
+decord
+datasets
+opencv-python
+av
+torchcodec
+ffmpeg

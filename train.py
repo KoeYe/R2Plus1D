@@ -9,9 +9,12 @@ from torchnet.engine import Engine
 from torchnet.logger import VisdomPlotLogger, VisdomLogger
 from tqdm import tqdm
 
-import utils
-from models.C3D import C3D
-from models.R2Plus1D import R2Plus1D
+# import utils
+# from models.C3D import C3D
+# from models.R2Plus1D import R2Plus1D
+from video_datasets import har_dataset, ssv2_dataset
+import video_datasets.utils as utils
+from models.r2plus1d import R2Plus1DClassifier as R2Plus1D
 
 torch.backends.cudnn.benchmark = True
 
@@ -132,13 +135,13 @@ if __name__ == '__main__':
     # record best val accuracy
     best_accuracy = 0
 
-    train_loader, val_loader, test_loader = utils.load_data(DATA_TYPE, BATCH_SIZE)
+    # train_loader, val_loader, test_loader = utils.load_data(DATA_TYPE, BATCH_SIZE)
+    train_loader, val_loader, test_loader = utils.make_data_loader(DATA_TYPE, BATCH_SIZE)
+
     NUM_CLASS = len(train_loader.dataset.label2index)
 
-    if MODEL_TYPE == 'r2plus1d':
-        model = R2Plus1D(NUM_CLASS, (2, 2, 2, 2))
-    else:
-        model = C3D(NUM_CLASS)
+    # if MODEL_TYPE == 'r2plus1d':
+    model = R2Plus1D(NUM_CLASS, pretrained=True)
 
     if PRE_TRAIN is not None:
         checkpoint = torch.load('epochs/{}'.format(PRE_TRAIN), map_location=lambda storage, loc: storage)
