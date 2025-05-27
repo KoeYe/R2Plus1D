@@ -1,0 +1,1 @@
+visdom -logging_level WARNING & python train.py --num_epochs 20 --data_type ucf101 --gpu_ids 0,1 --model_type r2plus1d --num_epochs 100 --batch_size 12 --pre_train ucf101_r2plus1d.pth
