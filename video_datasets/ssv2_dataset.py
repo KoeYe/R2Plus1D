@@ -21,7 +21,7 @@ except ImportError:
 from datasets import load_dataset
 
 class HuggingFaceSSV2Dataset(Dataset):
-    def __init__(self, data_dir, data_split='train', clip_len=16, frame_step=1, transform=None):
+    def __init__(self, data_dir, data_split='train', clip_len=8, frame_step=1, transform=None):
         self.video_dir = os.path.join(data_dir, "20bn-something-something-v2")
         if not os.path.isdir(self.video_dir):
             raise FileNotFoundError(f"Video directory not found: {self.video_dir}")
@@ -65,11 +65,12 @@ class HuggingFaceSSV2Dataset(Dataset):
         label = self.template2idx[label]
 
         total_frames = video.shape[0]
+        frame_step = total_frames // self.clip_len
         if self.clip_len > 0:
-            max_start = max(0, total_frames - self.clip_len * self.frame_step)
+            max_start = max(0, total_frames - self.clip_len * frame_step)
             start_idx = random.randint(0, max_start) if hasattr(self, 'mode') and self.mode == 'train' else 0
 
-            indices = [min(start_idx + i * self.frame_step, total_frames - 1) for i in range(self.clip_len)]
+            indices = [min(start_idx + i * frame_step, total_frames - 1) for i in range(self.clip_len)]
             clip = video[indices]  # (clip_len, H, W, 3)
         else:
             clip = video  # (T, H, W, 3)
