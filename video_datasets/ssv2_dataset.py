@@ -1,6 +1,7 @@
 import os
 import json
 import random
+from functools import lru_cache
 
 import numpy as np
 import torch
@@ -21,7 +22,7 @@ except ImportError:
 from datasets import load_dataset
 
 class HuggingFaceSSV2Dataset(Dataset):
-    def __init__(self, data_dir, data_split='train', clip_len=8, frame_step=1, transform=None):
+    def __init__(self, data_dir, data_split='train', clip_len=16, transform=None, temporal_random=False):
         self.video_dir = os.path.join(data_dir, "20bn-something-something-v2")
         if not os.path.isdir(self.video_dir):
             raise FileNotFoundError(f"Video directory not found: {self.video_dir}")
@@ -34,10 +35,11 @@ class HuggingFaceSSV2Dataset(Dataset):
         )
         print(f"{data_split} dataset loaded")
 
+        self.mode = data_split
+        self.temporal_random = temporal_random
         self.idx2templates = sorted(set(self.hf_dataset["template"]))
         self.template2idx = {template: idx for idx, template in enumerate(self.idx2templates)}
         self.clip_len = clip_len
-        self.frame_step = frame_step
         self.transform = transform
         if self.transform is None:
             mean = [0.43216, 0.394666, 0.37645]
@@ -53,11 +55,16 @@ class HuggingFaceSSV2Dataset(Dataset):
     def __len__(self):
         return len(self.hf_dataset)
 
+    @lru_cache(maxsize=16)
+    def _get_videoreader(self, filepath):
+        return VideoReader(filepath, ctx=cpu(0), num_threads=1)
+
     def __getitem__(self, idx):
         example = self.hf_dataset[idx]
         id = example['id']
         filename = os.path.join(self.video_dir, f"{id}.webm")
-        vr = VideoReader(filename, ctx=cpu(0), num_threads=1)
+        # vr = VideoReader(filename, ctx=cpu(0), num_threads=1)
+        vr = self._get_videoreader(filename)
 
         video = vr.get_batch(range(len(vr))).asnumpy() # (T, H, W, 3)
 
@@ -65,15 +72,37 @@ class HuggingFaceSSV2Dataset(Dataset):
         label = self.template2idx[label]
 
         total_frames = video.shape[0]
-        frame_step = total_frames // self.clip_len
-        if self.clip_len > 0:
-            max_start = max(0, total_frames - self.clip_len * frame_step)
-            start_idx = random.randint(0, max_start) if hasattr(self, 'mode') and self.mode == 'train' else 0
+        if not self.temporal_random:
+            frame_step = total_frames // self.clip_len
+            if self.clip_len > 0:
+                max_start = max(0, total_frames - self.clip_len * frame_step)
+                start_idx = random.randint(0, max_start) if hasattr(self, 'mode') and self.mode == 'train' else 0
 
-            indices = [min(start_idx + i * frame_step, total_frames - 1) for i in range(self.clip_len)]
-            clip = video[indices]  # (clip_len, H, W, 3)
+                indices = [min(start_idx + i * frame_step, total_frames - 1) for i in range(self.clip_len)]
+                clip = video[indices]  # (clip_len, H, W, 3)
+            else:
+                clip = video  # (T, H, W, 3)
         else:
-            clip = video  # (T, H, W, 3)
+            segment_size = total_frames / float(self.clip_len)
+            indices = []
+            for i in range(self.clip_len):
+                start_f = i * segment_size
+                end_f = (i + 1) * segment_size
+
+                seg_start = int(np.floor(start_f))
+                seg_end = int(np.floor(end_f))
+                if seg_end <= seg_start:
+                    seg_end = min(seg_start + 1, total_frames)
+
+                if self.mode == "train":
+                    # pick random in [seg_start, seg_end-1]
+                    chosen = random.randint(seg_start, seg_end - 1)
+                else:
+                    # center frame: average of seg_start and seg_end, truncated
+                    chosen = (seg_start + seg_end) // 2
+                chosen = min(chosen, total_frames - 1)
+                indices.append(chosen)
+            clip = vr.get_batch(indices).asnumpy()
 
         clip = clip / 255.0
         if self.transform:
@@ -84,9 +113,52 @@ class HuggingFaceSSV2Dataset(Dataset):
 
         return clip, label
 
+import matplotlib.pyplot as plt
+def visualize_clip(clip_tensor, mean, std):
+    """
+    Given a clip tensor of shape (C, T, H, W) that was normalized
+    with Normalize(mean, std), unnormalize it and plot each frame
+    in a row of subplots.
+    """
+    C, T, H, W = clip_tensor.shape
+    # Move to CPU / numpy
+    clip_np = clip_tensor.cpu().numpy()  # still normalized
+
+    # Unnormalize per‐channel
+    for c in range(C):
+        clip_np[c, :, :, :] = clip_np[c, :, :, :] * std[c] + mean[c]
+
+    # Now clip_np is in [0,1] (approximately). Rearrange to (T, H, W, C)
+    clip_np = np.transpose(clip_np, (1, 2, 3, 0))
+
+    # Plot
+    fig, axes = plt.subplots(1, T, figsize=(T * 3, 3))
+    if T == 1:
+        axes = [axes]  # make it iterable if only one frame
+
+    for t in range(T):
+        frame = clip_np[t]
+        # Clip to [0,1] just in case of tiny numerical overshoot
+        frame = np.clip(frame, 0.0, 1.0)
+        axes[t].imshow(frame)
+        axes[t].axis("off")
+        axes[t].set_title(f"Frame {t}")
+    plt.tight_layout()
+    plt.show()
+
 if __name__ == '__main__':
-    dataset = HuggingFaceSSV2Dataset("../data/something-something-v2", data_split='train')
+    dataset = HuggingFaceSSV2Dataset("../data/something-something-v2", data_split='train', temporal_random=True)
+    samples = 5
     print(len(dataset))
-    video, label = dataset[0]
-    print(video.shape)
-    print(label)
+    for _ in range(samples):
+        idx = np.random.randint(len(dataset))
+        video, label = dataset[idx]
+        print(video.shape)
+        print(label)
+        print(dataset.idx2templates[label])
+
+        # The same mean/std that the dataset’s default transform used:
+        mean = [0.43216, 0.394666, 0.37645]
+        std = [0.22803, 0.22145, 0.216989]
+
+        visualize_clip(video, mean, std)

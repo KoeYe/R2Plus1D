@@ -77,6 +77,7 @@ class Trainer:
             print(f"Epoch {epoch}:")
             print(f"  Train loss: {train_loss:.4f}, acc: {train_acc:.4f}")
             print(f"  Val   loss: {val_loss:.4f}, acc: {val_acc:.4f}")
+            torch.save(self.model.state_dict(), "./output/r2plus1d_18_latest.pt")
             train_loss_history.append(train_loss)
             val_loss_history.append(val_loss)
             train_acc_history.append(train_acc)

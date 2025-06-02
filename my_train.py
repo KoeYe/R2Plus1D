@@ -13,12 +13,12 @@ import matplotlib.pyplot as plt
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = R2Plus1DClassifier(num_classes=174, pretrained=True)
 data_root = "./data/something-something-v2"
-train_set = HuggingFaceSSV2Dataset(data_root)
-val_set = HuggingFaceSSV2Dataset(data_root, data_split='validation')
+train_set = HuggingFaceSSV2Dataset(data_root, temporal_random=True)
+val_set = HuggingFaceSSV2Dataset(data_root, data_split='validation', temporal_random=True)
 num_cls = len(train_set.idx2templates)
 
-train_loader = DataLoader(train_set, batch_size=16, shuffle=True, num_workers=4)
-val_loader = DataLoader(val_set, batch_size=16, shuffle=False, num_workers=4)
+train_loader = DataLoader(train_set, batch_size=8, shuffle=True, num_workers=4)
+val_loader = DataLoader(val_set, batch_size=8, shuffle=False, num_workers=4)
 
 trainer = Trainer(model, train_loader, val_loader, device)
 train_loss_history, val_loss_history, train_acc_history, val_acc_history = trainer.fit(epochs=30)
