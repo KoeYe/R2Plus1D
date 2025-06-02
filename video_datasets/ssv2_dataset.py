@@ -21,7 +21,7 @@ except ImportError:
 from datasets import load_dataset
 
 class HuggingFaceSSV2Dataset(Dataset):
-    def __init__(self, data_dir, data_split='train', clip_len=8, frame_step=1, transform=None):
+    def __init__(self, data_dir, data_split='train', clip_len=16, frame_step=1, transform=None):
         self.video_dir = os.path.join(data_dir, "20bn-something-something-v2")
         if not os.path.isdir(self.video_dir):
             raise FileNotFoundError(f"Video directory not found: {self.video_dir}")

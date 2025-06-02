@@ -1,6 +1,6 @@
 from .ssv2_dataset import *
 from .har_dataset import *
-from orig_utils import *
+from .orig_utils import *
 
 def make_data_loader(dataset_name="ssv2", batch_size=8):
     if dataset_name == "ssv2":

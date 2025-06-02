@@ -118,7 +118,7 @@ def on_end_epoch(state):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train Activity Recognition Model')
-    parser.add_argument('--data_type', default='ucf101', type=str, choices=['ucf101', 'hmdb51', 'kinetics600'],
+    parser.add_argument('--data_type', default='ssv2', type=str, choices=['ucf101', 'hmdb51', 'kinetics600', 'ssv2', 'har'],
                         help='dataset type')
     parser.add_argument('--gpu_ids', default='0,1', type=str, help='selected gpu')
     parser.add_argument('--model_type', default='r2plus1d', type=str, choices=['r2plus1d', 'c3d'], help='model type')
