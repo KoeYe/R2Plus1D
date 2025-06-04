@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchvision.models.video import r2plus1d_18 as r2p1d_18_torch
 # from torchvision.models.video import r2plus1d_34
+import os
+
 class Conv2Plus1D(nn.Sequential):
     def __init__(self, in_channels: int, out_channels: int, mid_channels: int, stride: int = 1, padding: int = 1) -> None:
         super().__init__(
@@ -175,7 +177,7 @@ def r2plus1d_18(num_classes: int = 400, in_channels: int = 3, pretrained=False) 
 def r2plus1d_34(num_classes: int = 400, in_channels: int = 3, pretrained=False) -> R2Plus1D:
     r2plus1d = R2Plus1D(R2Plus1DBlock, [3, 4, 6, 3], num_classes=num_classes, in_channels=in_channels)
     if pretrained:
-        r2plus1d_torch_dict = torch.load("../pretrained_wgts/r2plus1d_34_IG65M.pth")
+        r2plus1d_torch_dict = torch.load(os.path.join(os.path.dirname(__file__), "..", "r2plus1d_34_IG65M.pth"))
         r2plus1d_dict = r2plus1d.state_dict()
 
         filtered_dict = {}

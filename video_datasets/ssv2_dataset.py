@@ -8,7 +8,7 @@ import torch
 from torch.utils.data import Dataset
 from torchvision import transforms
 import cv2
-from torchvision.transforms import Compose, ToPILImage, Resize, CenterCrop, ToTensor, Normalize
+from torchvision.transforms import Compose, ToPILImage, Resize, CenterCrop, ToTensor, Normalize, RandomCrop
 
 # For raw video decoding
 try:
@@ -29,41 +29,63 @@ class HuggingFaceSSV2Dataset(Dataset):
 
         # Load and decode videos via Hugging Face dataset library
         print(f"loading {data_split} dataset files, it may take a while...")
-        self.hf_dataset = load_dataset(
-            data_dir,
-            split=data_split,
-        )
+        # self.hf_dataset = load_dataset(
+        #     data_dir,
+        #     split=data_split,
+        #     # streaming=True,
+        #     num_proc=32
+        # )
+        with open(os.path.join(data_dir, "labels", f"{data_split}.json"), 'r') as f:
+            self.data = json.load(f)
+        # print(data[:10])
         print(f"{data_split} dataset loaded")
 
         self.mode = data_split
         self.temporal_random = temporal_random
-        self.idx2templates = sorted(set(self.hf_dataset["template"]))
+        self.idx2templates = sorted(set(self.data[i]["template"] for i in range(len(self.data))))
         self.template2idx = {template: idx for idx, template in enumerate(self.idx2templates)}
         self.clip_len = clip_len
         self.transform = transform
         if self.transform is None:
             mean = [0.43216, 0.394666, 0.37645]
             std = [0.22803, 0.22145, 0.216989]
-            self.transform = Compose([
+            # self.transform = Compose([
+            #     ToPILImage(),
+            #     Resize((128, 171)),
+            #     CenterCrop((112, 112)),
+            #     ToTensor(),
+            #     Normalize(mean=mean, std=std)
+            # ])
+            if self.mode == 'train':
+                self.transform = Compose([
                 ToPILImage(),
-                Resize((128, 171)),
-                CenterCrop((112, 112)),
+                Resize((256)),
+                RandomCrop((224)),
                 ToTensor(),
                 Normalize(mean=mean, std=std)
-            ])
+                ])
+            else:
+                self.transform = Compose([
+                ToPILImage(),
+                Resize(256),
+                CenterCrop(224),
+                ToTensor(),
+                Normalize(mean, std)
+                ])
 
     def __len__(self):
-        return len(self.hf_dataset)
+        return len(self.data)
 
     @lru_cache(maxsize=16)
     def _get_videoreader(self, filepath):
         return VideoReader(filepath, ctx=cpu(0), num_threads=1)
 
     def __getitem__(self, idx):
-        example = self.hf_dataset[idx]
+        example = self.data[idx]
         id = example['id']
         filename = os.path.join(self.video_dir, f"{id}.webm")
         # vr = VideoReader(filename, ctx=cpu(0), num_threads=1)
+        # print(os.path.exists(filename))
         vr = self._get_videoreader(filename)
 
         video = vr.get_batch(range(len(vr))).asnumpy() # (T, H, W, 3)

@@ -3,26 +3,30 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.optim.lr_scheduler as lr_scheduler
 from video_datasets import HuggingFaceSSV2Dataset
-# from models.r2plus1d import R2Plus1DClassifier
-from models.r2plus1d_attn import R2Plus1DClassifier
+from models.r2plus1d import R2Plus1DClassifier
+# from models.r2plus1d_attn import R2Plus1DClassifier
 import tqdm
 from torch.utils.data import DataLoader
 from trainer import Trainer
 import matplotlib.pyplot as plt
+import multiprocessing
+import os
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = R2Plus1DClassifier(num_classes=174, pretrained=True)
-data_root = "./data/something-something-v2"
+model = R2Plus1DClassifier(num_classes=174, pretrained=True, backbone="18")
+data_root = os.path.join(os.path.dirname(__file__), "data", "something-something-v2")
+# print(data_root)
 train_set = HuggingFaceSSV2Dataset(data_root, temporal_random=True)
 val_set = HuggingFaceSSV2Dataset(data_root, data_split='validation', temporal_random=True)
 num_cls = len(train_set.idx2templates)
 
-train_loader = DataLoader(train_set, batch_size=8, shuffle=True, num_workers=4)
-val_loader = DataLoader(val_set, batch_size=8, shuffle=False, num_workers=4)
+train_loader = DataLoader(train_set, batch_size=8, shuffle=True, num_workers=8)
+val_loader = DataLoader(val_set, batch_size=8, shuffle=False, num_workers=8)
 
 trainer = Trainer(model, train_loader, val_loader, device)
 train_loss_history, val_loss_history, train_acc_history, val_acc_history = trainer.fit(epochs=30)
 torch.save(model.state_dict(), "./output/r2plus1d_18.pt")
+# torch.save(model.state_dict(), r"E:\Playground\R2Plus1D\r2plus1d_34_IG65M.pth")
 
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
 
@@ -45,7 +49,7 @@ ax2.legend()
 ax2.grid(True)
 
 plt.tight_layout()
-plt.savefig('results/ssv2_r2plus1d_attn.png', dpi=200)
+plt.savefig('results/ssv2_r2plus1d_34.png', dpi=200)
 plt.show()
 
 
