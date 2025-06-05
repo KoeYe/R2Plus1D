@@ -1,5 +1,4 @@
 import argparse
-
 import pandas as pd
 import torch
 import torch.optim as optim
@@ -8,49 +7,39 @@ from torch import nn
 from torchnet.engine import Engine
 from torchnet.logger import VisdomPlotLogger, VisdomLogger
 from tqdm import tqdm
-
-# import utils
-# from models.C3D import C3D
-# from models.R2Plus1D import R2Plus1D
+from models.r2plus1d import R2Plus1DClassifier as R2Plus1D
 from video_datasets import har_dataset, ssv2_dataset
 import video_datasets.utils as utils
-from models.r2plus1d import R2Plus1DClassifier as R2Plus1D
+from torch.cuda.amp import autocast, GradScaler  # Add mixed precision tools
 
 torch.backends.cudnn.benchmark = True
 
-
 def processor(sample):
     data, labels, training = sample
-
     data, labels = data.to(device_ids[0]), labels.to(device_ids[0])
 
     model.train(training)
-
-    classes = model(data)
-    loss = loss_criterion(classes, labels)
+    with autocast(enabled=training):  # Enable mixed precision
+        classes = model(data)
+        loss = loss_criterion(classes, labels)
     return loss, classes
-
 
 def on_sample(state):
     state['sample'].append(state['train'])
-
 
 def reset_meters():
     meter_accuracy.reset()
     meter_loss.reset()
     meter_confusion.reset()
 
-
 def on_forward(state):
     meter_accuracy.add(state['output'].detach().cpu(), state['sample'][1])
     meter_confusion.add(state['output'].detach().cpu(), state['sample'][1])
     meter_loss.add(state['loss'].item())
 
-
 def on_start_epoch(state):
     reset_meters()
     state['iterator'] = tqdm(state['iterator'])
-
 
 def on_end_epoch(state):
     loss_logger.log(state['epoch'], meter_loss.value()[0], name='train')
@@ -69,6 +58,14 @@ def on_end_epoch(state):
     with torch.no_grad():
         engine.test(processor, val_loader)
 
+    global best_accuracy
+    if meter_accuracy.value()[0] > best_accuracy:
+        if len(device_ids) > 1:
+            torch.save(model.module.state_dict(), 'epochs/{}_{}.pth'.format(DATA_TYPE, MODEL_TYPE))
+        else:
+            torch.save(model.state_dict(), 'epochs/{}_{}.pth'.format(DATA_TYPE, MODEL_TYPE))
+        best_accuracy = meter_accuracy.value()[0]
+
     loss_logger.log(state['epoch'], meter_loss.value()[0], name='val')
     top1_accuracy_logger.log(state['epoch'], meter_accuracy.value()[0], name='val')
     top5_accuracy_logger.log(state['epoch'], meter_accuracy.value()[1], name='val')
@@ -78,15 +75,6 @@ def on_end_epoch(state):
     results['val_top5_accuracy'].append(meter_accuracy.value()[1])
     print('[Epoch %d] Valing Loss: %.4f Top1 Accuracy: %.2f%% Top5 Accuracy: %.2f%%' % (
         state['epoch'], meter_loss.value()[0], meter_accuracy.value()[0], meter_accuracy.value()[1]))
-
-    # save best model
-    global best_accuracy
-    if meter_accuracy.value()[0] > best_accuracy:
-        if len(device_ids) > 1:
-            torch.save(model.module.state_dict(), 'epochs/{}_{}.pth'.format(DATA_TYPE, MODEL_TYPE))
-        else:
-            torch.save(model.state_dict(), 'epochs/{}_{}.pth'.format(DATA_TYPE, MODEL_TYPE))
-        best_accuracy = meter_accuracy.value()[0]
 
     scheduler.step(meter_loss.value()[0])
     reset_meters()
@@ -130,9 +118,7 @@ if __name__ == '__main__':
     DATA_TYPE, GPU_IDS, BATCH_SIZE, NUM_EPOCH = opt.data_type, opt.gpu_ids, opt.batch_size, opt.num_epochs
     MODEL_TYPE, PRE_TRAIN, device_ids = opt.model_type, opt.pre_train, [int(gpu) for gpu in GPU_IDS.split(',')]
     results = {'train_loss': [], 'train_top1_accuracy': [], 'train_top5_accuracy': [], 'val_loss': [],
-               'val_top1_accuracy': [], 'val_top5_accuracy': [], 'test_loss': [], 'test_top1_accuracy': [],
-               'test_top5_accuracy': []}
-    # record best val accuracy
+               'val_top1_accuracy': [], 'val_top5_accuracy': [], 'test_loss': [], 'test_top1_accuracy': [], 'test_top5_accuracy': []}
     best_accuracy = 0
 
     # train_loader, val_loader, test_loader = utils.load_data(DATA_TYPE, BATCH_SIZE)
@@ -140,22 +126,17 @@ if __name__ == '__main__':
 
     NUM_CLASS = len(train_loader.dataset.label2index)
 
-    # if MODEL_TYPE == 'r2plus1d':
     model = R2Plus1D(NUM_CLASS, pretrained=True)
 
     if PRE_TRAIN is not None:
         checkpoint = torch.load('epochs/{}'.format(PRE_TRAIN), map_location=lambda storage, loc: storage)
-        # load pre-trained model which trained on the same dataset
         if DATA_TYPE in PRE_TRAIN:
-            # load same type pre-trained model
             if PRE_TRAIN.split('.')[0].split('_')[1] == MODEL_TYPE:
                 model.load_state_dict(checkpoint)
             else:
                 raise NotImplementedError('the pre-trained model must be the same model type')
-        # warm starting model by loading weights from a model which trained on other dataset, then fine tuning
         else:
             if PRE_TRAIN.split('.')[0].split('_')[1] == MODEL_TYPE:
-                # don't load the parameters of last layer
                 checkpoint.pop('fc.weight')
                 checkpoint.pop('fc.bias')
                 model.load_state_dict(checkpoint, strict=False)
@@ -169,14 +150,17 @@ if __name__ == '__main__':
     loss_criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(optim_configs, lr=1e-4, weight_decay=5e-4)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, factor=0.1, verbose=True)
+
+    scaler = GradScaler()
+
     print('Number of parameters:', sum(param.numel() for param in model.parameters()))
 
     model = model.to(device_ids[0])
     if len(device_ids) > 1:
         if torch.cuda.device_count() >= len(device_ids):
-            model = nn.DataParallel(model, device_ids=device_ids)
+            model = nn.DataParallel(model, device_ids=device_ids)  # Use DataParallel for multi-GPU
         else:
-            raise ValueError("the machine don't have {} gpus".format(str(len(device_ids))))
+            raise ValueError(f"the machine doesn't have {len(device_ids)} GPUs")
 
     engine = Engine()
     meter_loss = tnt.meter.AverageValueMeter()
