@@ -26,8 +26,8 @@ train_set = HuggingFaceSSV2Dataset(data_root, temporal_random=True)
 val_set = HuggingFaceSSV2Dataset(data_root, data_split='validation', temporal_random=True)
 num_cls = len(train_set.idx2templates)
 
-train_loader = DataLoader(train_set, batch_size=128, shuffle=True, num_workers=8)
-val_loader = DataLoader(val_set, batch_size=128, shuffle=False, num_workers=8)
+train_loader = DataLoader(train_set, batch_size=96, shuffle=True, num_workers=8)
+val_loader = DataLoader(val_set, batch_size=96, shuffle=False, num_workers=8)
 
 trainer = Trainer(model, train_loader, val_loader, device)
 train_loss_history, val_loss_history, train_acc_history, val_acc_history = trainer.fit(epochs=30)

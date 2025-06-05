@@ -133,8 +133,10 @@ class HuggingFaceSSV2Dataset(Dataset):
 
         clip = clip.permute(1, 0, 2, 3).contiguous()
 
-        return clip, label
+        clip = torch.as_tensor(clip, dtype=torch.float16)
 
+        return clip, label
+    
 import matplotlib.pyplot as plt
 def visualize_clip(clip_tensor, mean, std):
     """

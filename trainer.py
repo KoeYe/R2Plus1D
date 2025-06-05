@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.optim.lr_scheduler as lr_scheduler
 import tqdm
+from torch.amp import autocast, GradScaler  # Add mixed precision tools
+import os
 
 class Trainer:
     """
@@ -16,6 +18,11 @@ class Trainer:
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = optim.Adam(self.model.parameters(), lr=1e-4)
         self.scheduler = lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min', patience=3)
+        self.scaler = GradScaler('cuda')  # Initialize the GradScaler for FP16 training
+        
+        # Create output directory if it doesn't exist
+        if not os.path.exists('./output'):
+            os.makedirs('./output')
 
     def train_epoch(self, epoch):
         self.model.train()
@@ -25,10 +32,16 @@ class Trainer:
             videos = videos.to(self.device)
             labels = labels.to(self.device)
             self.optimizer.zero_grad()
-            logits = self.model(videos)
-            loss = self.criterion(logits, labels)
-            loss.backward()
-            self.optimizer.step()
+
+            with autocast(device_type='cuda'):  # Enable mixed precision training
+                logits = self.model(videos)
+                loss = self.criterion(logits, labels)
+            # loss.backward()
+            # self.optimizer.step()
+        
+            self.scaler.scale(loss).backward()  # Scale the loss for FP16
+            self.scaler.step(self.optimizer)  # Step the optimizer
+            self.scaler.update()  # Update the scaler
 
             total_loss += loss.item() * videos.size(0)
             preds = logits.argmax(dim=1)
@@ -51,8 +64,10 @@ class Trainer:
             for videos, labels in pbar:
                 videos = videos.to(self.device)
                 labels = labels.to(self.device)
-                logits = self.model(videos)
-                loss = self.criterion(logits, labels)
+
+                with autocast(device_type='cuda'):  # Enable mixed precision evaluation
+                    logits = self.model(videos)
+                    loss = self.criterion(logits, labels)
 
                 total_loss += loss.item() * videos.size(0)
                 preds = logits.argmax(dim=1)
@@ -70,6 +85,7 @@ class Trainer:
     def fit(self, epochs):
         train_loss_history, val_loss_history = [], []
         train_acc_history, val_acc_history = [], []
+        best_val_loss = float('inf')
         for epoch in range(1, epochs + 1):
             train_loss, train_acc = self.train_epoch(epoch)
             val_loss, val_acc = self.eval_epoch(epoch)
@@ -78,6 +94,9 @@ class Trainer:
             print(f"  Train loss: {train_loss:.4f}, acc: {train_acc:.4f}")
             print(f"  Val   loss: {val_loss:.4f}, acc: {val_acc:.4f}")
             torch.save(self.model.state_dict(), "./output/r2plus1d_18_latest.pt")
+            if val_loss < best_val_loss:
+                torch.save(self.model.state_dict(), "./output/r2plus1d_18_best.pt")
+                best_val_loss = val_loss
             train_loss_history.append(train_loss)
             val_loss_history.append(val_loss)
             train_acc_history.append(train_acc)
