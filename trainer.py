@@ -5,6 +5,7 @@ import torch.optim.lr_scheduler as lr_scheduler
 import tqdm
 from torch.amp import autocast, GradScaler  # Add mixed precision tools
 import os
+from torch.amp import autocast, GradScaler
 
 class Trainer:
     """
@@ -33,12 +34,12 @@ class Trainer:
             labels = labels.to(self.device)
             self.optimizer.zero_grad()
 
-            with autocast(device_type='cuda'):  # Enable mixed precision training
+            with autocast('cuda'):  # Enable mixed precision training
                 logits = self.model(videos)
                 loss = self.criterion(logits, labels)
             # loss.backward()
             # self.optimizer.step()
-        
+
             self.scaler.scale(loss).backward()  # Scale the loss for FP16
             self.scaler.step(self.optimizer)  # Step the optimizer
             self.scaler.update()  # Update the scaler
@@ -93,9 +94,9 @@ class Trainer:
             print(f"Epoch {epoch}:")
             print(f"  Train loss: {train_loss:.4f}, acc: {train_acc:.4f}")
             print(f"  Val   loss: {val_loss:.4f}, acc: {val_acc:.4f}")
-            torch.save(self.model.state_dict(), "./output/r2plus1d_18_latest.pt")
+            torch.save(self.model.state_dict(), "output/r2plus1d_18_latest_base.pt")
             if val_loss < best_val_loss:
-                torch.save(self.model.state_dict(), "./output/r2plus1d_18_best.pt")
+                torch.save(self.model.state_dict(), "output/r2plus1d_18_best_base.pt")
                 best_val_loss = val_loss
             train_loss_history.append(train_loss)
             val_loss_history.append(val_loss)
