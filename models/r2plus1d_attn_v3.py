@@ -86,8 +86,8 @@ class Conv2Plus1D(nn.Sequential):
             ),
             nn.BatchNorm3d(mid_channels),
             nn.ReLU(inplace=True),
-            TemporalSelfAttention(mid_channels),
-            nn.ReLU(inplace=True), # the output of SA is already normalized
+            # TemporalSelfAttention(mid_channels),
+            # nn.ReLU(inplace=True), # the output of SA is already normalized
             # Now, we have (B, C, T, H, W)
             # temporal
             nn.Conv3d(
@@ -118,7 +118,9 @@ class R2Plus1DBlock(nn.Module):
         self.conv1 = nn.Sequential(
             Conv2Plus1D(in_channels, out_channels, mid_channels, stride),
             nn.BatchNorm3d(out_channels),
-            nn.ReLU(inplace=True)
+            nn.ReLU(inplace=True),
+            TemporalSelfAttention(out_channels),
+            nn.ReLU(inplace=True), # the output of SA is already normalized
         )
 
         # Block 2  (temporal enhancement)
@@ -127,7 +129,9 @@ class R2Plus1DBlock(nn.Module):
                 out_channels * 3 * 3 + 3 * out_channels)
         self.conv2 = nn.Sequential(
             Conv2Plus1D(out_channels, out_channels, mid_channels, 1),
-            nn.BatchNorm3d(out_channels)
+            nn.BatchNorm3d(out_channels),
+            nn.ReLU(inplace=True),
+            TemporalSelfAttention(out_channels),
         )
 
         # Skip connection (unchanged)
