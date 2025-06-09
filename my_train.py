@@ -5,7 +5,9 @@ import torch.optim.lr_scheduler as lr_scheduler
 from video_datasets import HuggingFaceSSV2Dataset
 # from models.r2plus1d import R2Plus1DClassifier
 # from models.r2plus1d_attn import R2Plus1DClassifier
-from models.r2plus1d_attn_v3 import R2Plus1DClassifier
+# from models.r2plus1d_attn_v3 import R2Plus1DClassifier
+# from models.r2plus1d_attn_v4 import R2Plus1DClassifier
+from models.r2plus1d_torch import R2Plus1DClassifier
 import tqdm
 from torch.utils.data import DataLoader
 from trainer import Trainer
@@ -21,7 +23,7 @@ if torch.cuda.device_count() > 1:
     model = nn.DataParallel(model)  # 将模型包装为DataParallel
 
 model = model.to(device)
-# model.load_state_dict(torch.load("output/r2plus1d_18_latest1pt"))
+# model.load_state_dict(torch.load("output/r2plus1d_18_best_base.pt"))
 # data_root ="/data/koe/data/something-something-v2"
 data_root ="./data/something-something-v2"
 # print(data_root)
@@ -31,8 +33,8 @@ num_cls = len(train_set.idx2templates)
 
 # train_loader = DataLoader(train_set, batch_size=96, shuffle=True, num_workers=8)
 # val_loader = DataLoader(val_set, batch_size=96, shuffle=False, num_workers=8)
-train_loader = DataLoader(train_set, batch_size=12, shuffle=True, num_workers=14)
-val_loader = DataLoader(val_set, batch_size=12, shuffle=False, num_workers=14)
+train_loader = DataLoader(train_set, batch_size=48, shuffle=True, num_workers=14)
+val_loader = DataLoader(val_set, batch_size=48, shuffle=False, num_workers=14)
 
 trainer = Trainer(model, train_loader, val_loader, device)
 train_loss_history, val_loss_history, train_acc_history, val_acc_history = trainer.fit(epochs=30)

@@ -59,16 +59,16 @@ class HuggingFaceSSV2Dataset(Dataset):
             if self.mode == 'train':
                 self.transform = Compose([
                 ToPILImage(),
-                Resize((256)),
-                RandomCrop((224)),
+                Resize((128)),
+                RandomCrop((112)),
                 ToTensor(),
                 Normalize(mean=mean, std=std)
                 ])
             else:
                 self.transform = Compose([
                 ToPILImage(),
-                Resize(256),
-                CenterCrop(224),
+                Resize(128),
+                CenterCrop(112),
                 ToTensor(),
                 Normalize(mean, std)
                 ])
