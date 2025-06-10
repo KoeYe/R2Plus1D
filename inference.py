@@ -1,83 +1,79 @@
-import argparse
-import math
-
-import cv2
-import numpy as np
 import torch
-import torch.nn.functional as F
+import torch.nn as nn
+import torch.optim as optim
+import torch.optim.lr_scheduler as lr_scheduler
+from video_datasets import HuggingFaceSSV2Dataset
+# from models.r2plus1d import R2Plus1DClassifier
+# from models.r2plus1d_attn import R2Plus1DClassifier
+# from models.r2plus1d_attn_v3 import R2Plus1DClassifier
+from models.r2plus1d_attn_v4 import R2Plus1DClassifier
+# from models.r2plus1d_torch import R2Plus1DClassifier
+# from torchvision.models.video import r3d_18
+from models.tsm import tsm_res50
+from models.r3d_torch import R3DClassifier
 
-import utils
-from models.C3D import C3D
-from models.R2Plus1D import R2Plus1D
+import tqdm
+from torch.utils.data import DataLoader
+from trainer import Trainer
+import matplotlib.pyplot as plt
+import multiprocessing
+import os
+from torch.amp import autocast, GradScaler
+
+torch.cuda.empty_cache()
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+data_root ="./data/something-something-v2"
+num_clips = 2
+
+# model = R2Plus1DClassifier(num_classes=174, backbone="18")
+# model.load_state_dict(torch.load("output/r2plus1d_18_attnv4_best.pt"))
+
+model = R3DClassifier(num_classes=174).to(device)
+state_dict = torch.load("output/r3d.pt")
+# state_dict = {'.'.join(key.split('.')[1:]): state_dict[key] for key in state_dict.keys()}
+# print(state_dict.keys())
+model.load_state_dict(state_dict)
+total_params = sum(p.numel() for p in model.parameters())
+print(f"Total parameters: {total_params}")
+
+val_set = HuggingFaceSSV2Dataset(data_root, data_split='validation', temporal_random=True, num_clip_eval=num_clips)
+val_loader = DataLoader(val_set, batch_size=64//num_clips, shuffle=False, num_workers=14)
 
 
-def center_crop(image):
-    height_index = math.floor((image.shape[0] - crop_size) / 2)
-    width_index = math.floor((image.shape[1] - crop_size) / 2)
-    image = image[height_index:height_index + crop_size, width_index:width_index + crop_size, :]
-    return np.array(image).astype(np.uint8)
+# model = tsm_res50(path='./pretrained_wgts/TSM_somethingv2_RGB_resnet50_shift8_blockres_avg_segment8_e45.pth')
+# val_set = HuggingFaceSSV2Dataset(data_root, data_split='validation', temporal_random=True, two_clip=True, use_standard_labels=True, num_clip_eval=num_clips)
+# val_loader = DataLoader(val_set, batch_size=64//num_clips, shuffle=False, num_workers=14)
 
+# 使用多GPU训练
+if torch.cuda.device_count() > 1:
+    print(f"Using {torch.cuda.device_count()} GPUs.")
+    model = nn.DataParallel(model)  # 将模型包装为DataParallel
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Test Activity Recognition')
-    parser.add_argument('--data_type', default='ucf101', type=str, choices=['ucf101', 'hmdb51', 'kinetics600'],
-                        help='dataset type')
-    parser.add_argument('--model_type', default='r2plus1d', type=str, choices=['r2plus1d', 'c3d'], help='model type')
-    parser.add_argument('--video_name', type=str, help='test video name')
-    parser.add_argument('--model_name', default='ucf101_r2plus1d.pth', type=str, help='model epoch name')
-    opt = parser.parse_args()
+model = model.to(device)
 
-    DATA_TYPE, MODEL_TYPE, VIDEO_NAME, MODEL_NAME = opt.data_type, opt.model_type, opt.video_name, opt.model_name
+model.eval()
+total_loss, correct, total = 0.0, 0, 0
+criterion = nn.CrossEntropyLoss()
+pbar = tqdm.tqdm(val_loader, desc=f"Testing", unit="batch", leave=False)
+with torch.no_grad():
+    for videos, labels in pbar:
+        videos = videos.to(device)
+        labels = labels.to(device)
 
-    clip_len, resize_height, crop_size, = utils.CLIP_LEN, utils.RESIZE_HEIGHT, utils.CROP_SIZE
-    class_names = utils.get_labels(DATA_TYPE)
+        with autocast(device_type='cuda'):  # Enable mixed precision evaluation
+            logits = model(videos)
+            loss = criterion(logits, labels)
 
-    DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+        total_loss += loss.item() * videos.size(0)
+        preds = logits.argmax(dim=1)
+        correct += (preds == labels).sum().item()
+        total += videos.size(0)
 
-    if '{}_{}.pth'.format(DATA_TYPE, MODEL_TYPE) != MODEL_NAME:
-        raise NotImplementedError('the model name must be the same model type and same data type')
+        running_loss = total_loss / total
+        running_acc = correct / total
+        pbar.set_postfix(loss=f"{running_loss:.4f}", acc=f"{running_acc:.4f}")
 
-    if MODEL_TYPE == 'r2plus1d':
-        model = R2Plus1D(len(class_names), (2, 2, 2, 2))
-    else:
-        model = C3D(len(class_names))
+avg_loss = total_loss / total
+acc = correct / total
 
-    checkpoint = torch.load('epochs/{}'.format(MODEL_NAME), map_location=lambda storage, loc: storage)
-    model = model.load_state_dict(checkpoint).to(DEVICE).eval()
-
-    # read video
-    cap, retaining, clips = cv2.VideoCapture(VIDEO_NAME), True, []
-    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    while retaining:
-        retaining, frame = cap.read()
-        if not retaining and frame is None:
-            continue
-        resize_width = math.floor(frame.shape[1] / frame.shape[0] * resize_height)
-        # make sure it can be cropped correctly
-        if resize_width < crop_size:
-            resize_width = resize_height
-            resize_height = math.floor(frame.shape[0] / frame.shape[1] * resize_width)
-        tmp_ = center_crop(cv2.resize(frame, (resize_width, resize_height)))
-        tmp = tmp_.astype(np.float32) / 255.0
-        clips.append(tmp)
-        if len(clips) == clip_len or len(clips) == frame_count:
-            inputs = np.array(clips)
-            inputs = np.expand_dims(inputs, axis=0)
-            inputs = np.transpose(inputs, (0, 4, 1, 2, 3))
-            inputs = torch.from_numpy(inputs).to(DEVICE)
-            with torch.no_grad():
-                outputs = model.forward(inputs)
-
-            prob = F.softmax(dim=-1)(outputs)
-            label = torch.max(prob, -1)[1].detach().cpu().numpy()[0]
-
-            cv2.putText(frame, class_names[label].split(' ')[-1].strip(), (20, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
-                        (0, 0, 255), 1)
-            cv2.putText(frame, 'prob: %.4f' % prob[0][label], (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 1)
-            clips.pop(0)
-
-        cv2.imshow('result', frame)
-        cv2.waitKey(30)
-
-    cap.release()
-    cv2.destroyAllWindows()
+print(f"Total loss: {avg_loss:.4f}, acc: {acc:.4f}")

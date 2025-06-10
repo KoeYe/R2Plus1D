@@ -13,4 +13,9 @@ class R2Plus1DClassifier(nn.Module):
         self.r2plus1d.fc = nn.Linear(in_features, num_classes)
 
     def forward(self, x):
-        return self.r2plus1d(x)
+        if len(x.shape) == 5:
+            return self.r2plus1d(x)
+        else:
+            B, N, C, T, H, W = x.shape
+            x = x.view(-1, C, T, H, W)
+            return self.r2plus1d(x).view(B, N, -1).mean(1)

@@ -80,11 +80,16 @@ class TemporalSelfAttention(nn.Module):
         x_seq = x_patch.permute(0, 3, 4, 2, 1).reshape(B*Hp*Wp, T, Cp)   # (B·Hʹ·Wʹ, T, Cʹ)
 
         # RoPE position embedding
-        if self.rope_sin is None or self.rope_sin.size(0) < T:
-            self._build_rope_cache(T, x.device)
-        q = self._apply_rope(x_seq, self.rope_sin[:T], self.rope_cos[:T])
-        k = self._apply_rope(x_seq, self.rope_sin[:T], self.rope_cos[:T])
-        v = x_seq                                           # no RoPE
+        # if self.rope_sin is None or self.rope_sin.size(0) < T:
+        #     self._build_rope_cache(T, x.device)
+        # q = self._apply_rope(x_seq, self.rope_sin[:T], self.rope_cos[:T])
+        # k = self._apply_rope(x_seq, self.rope_sin[:T], self.rope_cos[:T])
+        # v = x_seq                                           # no RoPE
+
+        # no RoPE
+        q = x_seq
+        k = x_seq
+        v = x_seq
 
         # causal attention mask
         causal_mask = torch.triu(torch.ones(T, T, dtype=torch.bool,
@@ -268,7 +273,12 @@ class R2Plus1DClassifier(nn.Module):
             raise NotImplementedError
 
     def forward(self, x):
-        return self.r2plus1d(x)
+        if len(x.shape) == 5:
+            return self.r2plus1d(x)
+        else:
+            B, N, C, T, H, W = x.shape
+            x = x.view(-1, C, T, H, W)
+            return self.r2plus1d(x).view(B, N, -1).mean(1)
 
 def r2plus1d_18(num_classes: int = 400, in_channels: int = 3, pretrained=False) -> R2Plus1D:
     r2plus1d = R2Plus1D(
@@ -334,6 +344,9 @@ def r2plus1d_34(num_classes: int = 400, in_channels: int = 3, pretrained=False) 
 if __name__ == '__main__':
     model = r2plus1d_18(num_classes=10, in_channels=3, pretrained=True)
     model.eval()
+
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"Total parameters: {total_params}")
 
     input_tensor = torch.randn(2, 3, 16, 112, 112)
 

@@ -4,6 +4,8 @@ import torch.nn.functional as F
 from torchvision.models.video import r2plus1d_18 as r2p1d_18_torch
 # from torchvision.models.video import r2plus1d_34
 import os
+from r2plus1d_torch import R2Plus1DClassifier as R2Plus1D_torch
+# from torchvision.models.video import r2plus1d_18
 
 class Conv2Plus1D(nn.Sequential):
     def __init__(self, in_channels: int, out_channels: int, mid_channels: int, stride: int = 1, padding: int = 1) -> None:
@@ -205,7 +207,11 @@ def r2plus1d_34(num_classes: int = 400, in_channels: int = 3, pretrained=False) 
 
 if __name__ == '__main__':
     model = r2plus1d_18(num_classes=10, in_channels=3, pretrained=True)
+    # model = R2Plus1DClassifier(173, )
     model.eval()
+
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"Total parameters: {total_params}")
 
     input_tensor = torch.randn(2, 3, 16, 112, 112)
 
@@ -213,3 +219,12 @@ if __name__ == '__main__':
         output = model(input_tensor)
 
     print("Output shape:", output.shape)
+
+    base_model = R2Plus1D_torch(10)
+    base_model.r2plus1d.fc = model.fc
+    base_model.eval()
+    with torch.no_grad():
+        base_output = base_model(input_tensor)
+
+    assert base_output.shape == output.shape
+    assert torch.allclose(base_output, output), f"{torch.max(torch.abs(base_output-output)), torch.min(torch.abs(base_output-output))}"

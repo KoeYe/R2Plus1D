@@ -22,7 +22,8 @@ except ImportError:
 from datasets import load_dataset
 
 class HuggingFaceSSV2Dataset(Dataset):
-    def __init__(self, data_dir, data_split='train', clip_len=8, transform=None, temporal_random=True):
+    def __init__(self, data_dir, data_split='train', clip_len=8, transform=None,
+                 temporal_random=True, num_clip_eval=1, use_standard_labels=False):
         self.video_dir = os.path.join(data_dir, "20bn-something-something-v2")
         if not os.path.isdir(self.video_dir):
             raise FileNotFoundError(f"Video directory not found: {self.video_dir}")
@@ -42,10 +43,24 @@ class HuggingFaceSSV2Dataset(Dataset):
 
         self.mode = data_split
         self.temporal_random = temporal_random
-        self.idx2templates = sorted(set(self.data[i]["template"] for i in range(len(self.data))))
-        self.template2idx = {template: idx for idx, template in enumerate(self.idx2templates)}
+        self.use_standard_labels = use_standard_labels
+
+        if use_standard_labels:
+            label_json = json.load(open(os.path.join(data_dir, "labels", "labels.json")))
+            self.idx2templates = {}
+            self.template2idx = {}
+            for key, value in label_json.items():
+                self.idx2templates[int(value)] = key
+                self.template2idx[key] = int(value)
+            # print(label_json)
+        else:
+            self.idx2templates = sorted(set(self.data[i]["template"] for i in range(len(self.data))))
+            self.template2idx = {template: idx for idx, template in enumerate(self.idx2templates)}
+
+
         self.clip_len = clip_len
         self.transform = transform
+        self.num_clip_eval = num_clip_eval
         if self.transform is None:
             mean = [0.43216, 0.394666, 0.37645]
             std = [0.22803, 0.22145, 0.216989]
@@ -59,16 +74,16 @@ class HuggingFaceSSV2Dataset(Dataset):
             if self.mode == 'train':
                 self.transform = Compose([
                 ToPILImage(),
-                Resize((128)),
-                RandomCrop((112)),
+                Resize((256)),
+                RandomCrop((224)),
                 ToTensor(),
                 Normalize(mean=mean, std=std)
                 ])
             else:
                 self.transform = Compose([
                 ToPILImage(),
-                Resize(128),
-                CenterCrop(112),
+                Resize(256),
+                CenterCrop(224),
                 ToTensor(),
                 Normalize(mean, std)
                 ])
@@ -79,6 +94,16 @@ class HuggingFaceSSV2Dataset(Dataset):
     @lru_cache(maxsize=16)
     def _get_videoreader(self, filepath):
         return VideoReader(filepath, ctx=cpu(0), num_threads=1)
+
+    def _get_center_indices(self, total_frames, clip_len, offset=0.0):
+        segment = total_frames / float(clip_len)
+        indices = []
+        for i in range(clip_len):
+            start_f = segment * i
+            end_f = segment * (i + 1)
+            idx = int((start_f + end_f) * 0.5 + offset * segment)
+            indices.append(min(idx, total_frames - 1))
+        return indices
 
     def __getitem__(self, idx):
         example = self.data[idx]
@@ -91,9 +116,29 @@ class HuggingFaceSSV2Dataset(Dataset):
         video = vr.get_batch(range(len(vr))).asnumpy() # (T, H, W, 3)
 
         label = example.get("template")
+        if self.use_standard_labels:
+            label = label.replace('[', '')
+            label = label.replace(']', '')
         label = self.template2idx[label]
 
         total_frames = video.shape[0]
+        if self.num_clip_eval > 1 and self.mode != 'train':
+            clips = []
+            for clip_id in range(self.num_clip_eval):
+                offset = float(clip_id) / self.num_clip_eval
+                indices = self._get_center_indices(total_frames, self.clip_len, offset)
+
+                # fetch and preprocess one clip
+                clip = vr.get_batch(indices).asnumpy()  # (clip_len, H, W, 3)
+                clip = clip / 255.0
+                if self.transform:
+                    clip = torch.stack([self.transform(f) for f in clip])
+                clip = clip.permute(1, 0, 2, 3).contiguous().to(torch.float16)  # (C,T,H,W)
+                clips.append(clip)
+
+            # output shape: (num_clips, C, T, H, W)
+            return torch.stack(clips, dim=0), label
+
         if not self.temporal_random:
             frame_step = total_frames // self.clip_len
             if self.clip_len > 0:
@@ -124,6 +169,8 @@ class HuggingFaceSSV2Dataset(Dataset):
                     chosen = (seg_start + seg_end) // 2
                 chosen = min(chosen, total_frames - 1)
                 indices.append(chosen)
+            # random.shuffle(indices)
+            # indices = indices[::-1]
             clip = vr.get_batch(indices).asnumpy()
 
         clip = clip / 255.0

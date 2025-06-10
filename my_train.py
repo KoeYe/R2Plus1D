@@ -6,8 +6,8 @@ from video_datasets import HuggingFaceSSV2Dataset
 # from models.r2plus1d import R2Plus1DClassifier
 # from models.r2plus1d_attn import R2Plus1DClassifier
 # from models.r2plus1d_attn_v3 import R2Plus1DClassifier
-# from models.r2plus1d_attn_v4 import R2Plus1DClassifier
-from models.r2plus1d_torch import R2Plus1DClassifier
+from models.r2plus1d_attn_v4 import R2Plus1DClassifier
+# from models.r2plus1d_torch import R2Plus1DClassifier
 import tqdm
 from torch.utils.data import DataLoader
 from trainer import Trainer
@@ -23,7 +23,7 @@ if torch.cuda.device_count() > 1:
     model = nn.DataParallel(model)  # 将模型包装为DataParallel
 
 model = model.to(device)
-# model.load_state_dict(torch.load("output/r2plus1d_18_best_base.pt"))
+model.load_state_dict(torch.load("output/r2plus1d_18_best_attn_v4.pt"))
 # data_root ="/data/koe/data/something-something-v2"
 data_root ="./data/something-something-v2"
 # print(data_root)
@@ -64,7 +64,7 @@ ax2.legend()
 ax2.grid(True)
 
 plt.tight_layout()
-plt.savefig('results/ssv2_r2plus1d_34.png', dpi=200)
+plt.savefig('results/ssv2_r2plus1d_18.png', dpi=200)
 plt.show()
 
 
