@@ -12,27 +12,41 @@ from trainer import Trainer
 import matplotlib.pyplot as plt
 import multiprocessing
 import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "0,2,3,4,5,6,7"
 torch.cuda.empty_cache()
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = R2Plus1DClassifier(num_classes=174, pretrained=True, backbone="18")
+
+from torchvision.models.video import r3d_18, R3D_18_Weights, r2plus1d_18, R2Plus1D_18_Weights
+# model = r3d_18(weights=R3D_18_Weights.KINETICS400_V1)  # 默认下载并缓存权重 :contentReference[oaicite:0]{index=0}
+model = r2plus1d_18(weights=R2Plus1D_18_Weights.KINETICS400_V1)  # 默认下载并缓存权重 :contentReference[oaicite:0]{index=0}
+# 替换最后一层分类头为你的 174 类
+model.fc = nn.Linear(model.fc.in_features, 174)
+# model = R2Plus1DClassifier(num_classes=174, pretrained=False, backbone="34")
+
 # 使用多GPU训练
 if torch.cuda.device_count() > 1:
     print(f"Using {torch.cuda.device_count()} GPUs.")
     model = nn.DataParallel(model)  # 将模型包装为DataParallel
 
-model = model.to(device)
-# model.load_state_dict(torch.load("output/r2plus1d_18_latest1pt"))
-# data_root ="/data/koe/data/something-something-v2"
-data_root ="./data/something-something-v2"
+model = model.to(device)  # 将模型移动到GPU
+# checkpoint = torch.load("./output_6.5/r2plus1d_18_latest.pt", map_location=device)
+
+# # print(checkpoint.keys())
+# if isinstance(checkpoint, dict):
+#     checkpoint = {'module.' + k if not k.startswith('module.') else k: v for k, v in checkpoint.items()}
+# model.load_state_dict(checkpoint)
+
+data_root ="/data/koe/data/something-something-v2"
+# data_root ="./data/something-something-v2"
 # print(data_root)
 train_set = HuggingFaceSSV2Dataset(data_root, temporal_random=True)
 val_set = HuggingFaceSSV2Dataset(data_root, data_split='validation', temporal_random=True)
-num_cls = len(train_set.idx2templates)
+# num_cls = len(train_set.idx2templates)
 
-# train_loader = DataLoader(train_set, batch_size=96, shuffle=True, num_workers=8)
-# val_loader = DataLoader(val_set, batch_size=96, shuffle=False, num_workers=8)
-train_loader = DataLoader(train_set, batch_size=12, shuffle=True, num_workers=14)
-val_loader = DataLoader(val_set, batch_size=12, shuffle=False, num_workers=14)
+train_loader = DataLoader(train_set, batch_size=64, shuffle=True, num_workers=14)
+val_loader = DataLoader(val_set, batch_size=64, shuffle=False, num_workers=14)
+# train_loader = DataLoader(train_set, batch_size=12, shuffle=True, num_workers=14)
+# val_loader = DataLoader(val_set, batch_size=12, shuffle=False, num_workers=14)
 
 trainer = Trainer(model, train_loader, val_loader, device)
 train_loss_history, val_loss_history, train_acc_history, val_acc_history = trainer.fit(epochs=30)
