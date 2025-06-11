@@ -22,14 +22,19 @@ class TemporalSelfAttention(nn.Module):
                  dropout: float = 0.):
         super().__init__()
         self.ws = window_size
-        inner_dim = inout_channels // reduction_ratio * 4   # keep it even
-        self.patch_embed = nn.Conv3d(inout_channels,
-                                     inner_dim,
-                                     kernel_size=(1, window_size, window_size),
-                                     stride=(1, window_size, window_size),
-                                     padding=(0, 0, 0),
-                                     bias=False)           # (B, C', T, H/ws, W/ws)
-
+        inner_dim = inout_channels   # keep it even
+        # self.patch_embed = nn.Conv3d(inout_channels,
+        #                              inner_dim,
+        #                              kernel_size=(1, window_size, window_size),
+        #                              stride=(1, window_size, window_size),
+        #                              padding=(0, 0, 0),
+        #                              bias=False)           # (B, C', T, H/ws, W/ws)
+        self.token_proj = nn.Linear(inout_channels, inner_dim, bias=False)
+        self.up_proj = nn.Sequential(
+           nn.Conv3d(inout_channels, inout_channels, kernel_size=1, bias=False),
+            nn.GELU(),
+            nn.BatchNorm3d(inout_channels),
+        )
         self.attn = nn.MultiheadAttention(inner_dim,
                                           num_heads,
                                           dropout=dropout,
@@ -44,12 +49,12 @@ class TemporalSelfAttention(nn.Module):
             nn.Dropout(dropout),
         )
         
-        self.patch_expand = nn.ConvTranspose3d(inner_dim,
-                                               inout_channels,
-                                               kernel_size=(1, window_size, window_size),
-                                               stride=(1, window_size, window_size),
-                                               padding=(0, 0, 0),
-                                               bias=False)
+        # self.patch_expand = nn.ConvTranspose3d(inner_dim,
+        #                                        inout_channels,
+        #                                        kernel_size=(1, window_size, window_size),
+        #                                        stride=(1, window_size, window_size),
+        #                                        padding=(0, 0, 0),
+        #                                        bias=False)
 
         self.dropout = nn.Dropout(dropout)
         self.norm = nn.LayerNorm(inout_channels)
@@ -85,13 +90,20 @@ class TemporalSelfAttention(nn.Module):
         """
         B, C, T, H, W = x.shape
         # spatial window
-        x_patch = self.patch_embed(x)        # (B, Cʹ, T, Hʹ, Wʹ)
+        # x_patch = self.patch_embed(x)        # (B, Cʹ, T, Hʹ, Wʹ)
+        x_patch = F.interpolate(
+            x,
+            size=(T, H//8, W//8),
+            mode='trilinear',
+            align_corners=False,
+        )     
         # print(x_patch.shape)
         B, Cp, T, Hp, Wp = x_patch.shape
         x_seq = x_patch.permute(0, 3, 4, 2, 1).reshape(B*Hp*Wp, T, Cp)   # (B·Hʹ·Wʹ, T, Cʹ)
         
         x_seq = self.mid_norm(x_seq)
-        # print(x_seq.shape)
+        #print(x_seq.shape)
+        x_seq = self.token_proj(x_seq)
 
         # RoPE position embedding
         if self.rope_sin is None or self.rope_sin.size(0) < T:
@@ -116,16 +128,20 @@ class TemporalSelfAttention(nn.Module):
         # attn_out = attn_out + x_seq          # residual (inner dim)
         attn_out = x_seq + self.dropout(attn_out)
         attn_out = F.gelu(attn_out)
-        attn_out = self.ffn(x_seq) + x_seq
-        #print(self.attn.in_proj_weight)
+        attn_out = self.ffn(attn_out) + attn_out
+
+
         # up scale back
         attn_out = attn_out.reshape(B, Hp, Wp, T, Cp) \
                              .permute(0, 4, 3, 1, 2)        # (B, Cʹ, T, Hʹ, Wʹ)
-        x_up = self.patch_expand(attn_out)                   # (B, C, T, H, W)
+        # x_up = self.patch_expand(attn_out)                   # (B, C, T, H, W)
         # print(x_up.shape)
         # ensure shape matching by interpolation
-        x_up = F.interpolate(x_up, size=(T, H, W), mode='nearest')
-
+        #print(attn_out.shape)
+        x_up = F.interpolate(attn_out, size=(T, H, W), mode='trilinear')
+        #x_up = self.up_proj(x_up)
+        #print(x_up.shape)
+    
         if torch.isnan(x_up).any():
             print("NaNs in SA block!")
         if self.training and torch.rand(1).item() < 0.001:   # ≈0.1 %
@@ -400,3 +416,4 @@ if __name__ == '__main__':
         output = model(input_tensor)
 
     print("Output shape:", output.shape)
+

@@ -6,11 +6,11 @@ from video_datasets import HuggingFaceSSV2Dataset
 # from models.r2plus1d import R2Plus1DClassifier
 # from models.r2plus1d_attn import R2Plus1DClassifier
 # from models.r2plus1d_attn_v3 import R2Plus1DClassifier
-# from models.r2plus1d_attn_v4 import R2Plus1DClassifier
-from models.r2plus1d_torch import R2Plus1DClassifier
+from models.r2plus1d_attn_v5 import R2Plus1DClassifier
+#from models.r2plus1d_torch import R2Plus1DClassifier
 import tqdm
 from torch.utils.data import DataLoader
-from trainer import Trainer
+from trainer2 import Trainer
 import matplotlib.pyplot as plt
 import multiprocessing
 import os
@@ -23,7 +23,32 @@ if torch.cuda.device_count() > 1:
     model = nn.DataParallel(model)  # 将模型包装为DataParallel
 
 model = model.to(device)
-# model.load_state_dict(torch.load("output/r2plus1d_18_best_base.pt"))
+def load_state_dict_safely(model, checkpoint_path):
+    checkpoint = torch.load(checkpoint_path)
+    model_dict = model.state_dict()
+
+    filtered_dict = {}
+    mismatched = []
+
+    for k, v in checkpoint.items():
+        if k in model_dict:
+            if model_dict[k].shape == v.shape:
+                filtered_dict[k] = v
+            else:
+                mismatched.append((k, v.shape, model_dict[k].shape))
+        else:
+            mismatched.append((k, v.shape, "NOT IN MODEL"))
+
+    print(f"Loaded {len(filtered_dict)} / {len(checkpoint)} params.")
+    if mismatched:
+        print("Skipped due to mismatch:")
+        for name, ckpt_shape, model_shape in mismatched:
+            print(f" - {name}: {ckpt_shape} -> {model_shape}")
+
+    model.load_state_dict(filtered_dict, strict=False)
+# Usage
+load_state_dict_safely(model, "output/r2plus1d_18_attnv4_best.pt")
+# model.load_state_dict(torch.load("output/r2plus1d_18_attnv4_best.pt"), strict=False)
 # data_root ="/data/koe/data/something-something-v2"
 data_root ="./data/something-something-v2"
 # print(data_root)
@@ -33,11 +58,11 @@ num_cls = len(train_set.idx2templates)
 
 # train_loader = DataLoader(train_set, batch_size=96, shuffle=True, num_workers=8)
 # val_loader = DataLoader(val_set, batch_size=96, shuffle=False, num_workers=8)
-train_loader = DataLoader(train_set, batch_size=48, shuffle=True, num_workers=14)
-val_loader = DataLoader(val_set, batch_size=48, shuffle=False, num_workers=14)
+train_loader = DataLoader(train_set, batch_size=64, shuffle=True, num_workers=16)
+val_loader = DataLoader(val_set, batch_size=64, shuffle=False, num_workers=16)
 
 trainer = Trainer(model, train_loader, val_loader, device)
-train_loss_history, val_loss_history, train_acc_history, val_acc_history = trainer.fit(epochs=30)
+train_loss_history, val_loss_history, train_acc_history, val_acc_history = trainer.fit(epochs=20)
 if not os.path.exists('./output'):
     os.makedirs('./output')
 torch.save(model.state_dict(), "./output/r2plus1d_18.pt")

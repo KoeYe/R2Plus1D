@@ -7,7 +7,6 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 from torchvision import transforms
-import cv2
 from torchvision.transforms import Compose, ToPILImage, Resize, CenterCrop, ToTensor, Normalize, RandomCrop
 
 # For raw video decoding
@@ -59,16 +58,16 @@ class HuggingFaceSSV2Dataset(Dataset):
             if self.mode == 'train':
                 self.transform = Compose([
                 ToPILImage(),
-                Resize((128)),
-                RandomCrop((112)),
+                Resize((256)),
+                RandomCrop((224)),
                 ToTensor(),
                 Normalize(mean=mean, std=std)
                 ])
             else:
                 self.transform = Compose([
                 ToPILImage(),
-                Resize(128),
-                CenterCrop(112),
+                Resize(256),
+                CenterCrop(224),
                 ToTensor(),
                 Normalize(mean, std)
                 ])

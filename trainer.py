@@ -17,7 +17,7 @@ class Trainer:
         self.val_loader = val_loader
         self.device = device
         self.criterion = nn.CrossEntropyLoss()
-        self.optimizer = optim.Adam(self.model.parameters(), lr=1e-4)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=1e-5, weight_decay=1e-4)
         self.scheduler = lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min', patience=3)
         self.scaler = GradScaler('cuda')  # Initialize the GradScaler for FP16 training
         
